@@ -1,0 +1,125 @@
+-- we want to be able to join tables temp_country and carbon_emissions
+-- these tables both contain info by country, so it makes sense to join them to 
+-- compare carbon emissions and temperatures by country
+-- this join requires some preprocessing 
+
+-- we have to add year as column in countries table (derive it from date),
+-- to be able to do grouping by it - data in temp_country is monthly
+-- and has to be aggregated to yearly values
+-- easiest way to do this is to make new table which contains new column for year
+
+-- also we need to add new column with country + year, which can be used as groping and joining key
+-- country and year make candidate key in both temp_country and carbon_emissions
+-- so that field must be derived in both tables
+-- code:
+
+
+
+-- TEMP_COUNTRY TABLE
+-- following code MUST be executed in HIVE
+-- it creates intermedeate table with only year kept from date (dt_year), 
+-- and composite key country_year
+-- it keeps temperature data unchanged
+
+CREATE TABLE temp_country_inter (
+    dt_year INT,
+    avg_temp FLOAT,
+    avg_temp_uncertainty FLOAT,
+    country VARCHAR (255),
+    country_year VARCHAR (255))
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+STORED AS PARQUET;
+
+-- filling with data
+
+INSERT INTO temp_country_inter 
+SELECT year(cast(dt as date)),
+	avg_temp, 
+	avg_temp_uncertainty, 
+	country,
+	concat(upper(country), ' ', cast(year(cast(dt as date)) as varchar(255))) 
+FROM temp_country;
+
+-- creating final table, aggregated yearly
+
+CREATE TABLE temp_country_yearly (
+    dt_year INT,
+    avg_temp FLOAT,
+    avg_temp_uncertainty FLOAT,
+    country VARCHAR (255),
+    country_year VARCHAR (255))
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+STORED AS PARQUET;
+
+-- filling with data
+-- this code MUST be run in IMPALA
+
+INSERT INTO temp_country_yearly
+SELECT cast(cast(avg(dt_year) as varchar(255)) as int), 
+cast(avg(avg_temp) as float),
+cast(avg(avg_temp_uncertainty) as float), 
+cast(group_concat(DISTINCT upper(country)) as varchar(255)), 
+country_year
+FROM temp_country_inter
+GROUP BY country_year;
+
+-- dropping intermediate table
+-- run in HIVE
+
+DROP TABLE temp_country_inter;
+
+
+
+
+-- carbon_emissions table
+-- run in HIVE
+
+CREATE TABLE carbon_emissions_yearly (
+	dt_year INT,
+	country VARCHAR (255),
+	country_year VARCHAR (255),
+	total FLOAT,
+	solid_fuel FLOAT,
+	liquid_fuel FLOAT,
+	gas_fuel FLOAT,
+	cement FLOAT,
+	gas_flaring FLOAT,
+	per_capita FLOAT,
+	bunker_fuels FLOAT)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\n'
+STORED AS PARQUET;
+
+-- filling with data
+
+INSERT INTO carbon_emissions_yearly
+SELECT  dt_year,
+	country, 
+	concat(country, ' ', cast(dt_year as varchar(255))),
+	total,
+	solid_fuel,
+	liquid_fuel,
+	gas_fuel,
+	cement,
+	gas_flaring,
+	per_capita,
+	bunker_fuels
+FROM carbon_emissions;
+
+-- dropping original table (without country_year)
+
+DROP TABLE carbon_emissions;
+
+-- now data can be joined on country_year
+-- inner join to keep only matching countries and years
+
+SELECT c.dt_year, c.country, c.total, c.solid_fuel, c.liquid_fuel, c.gas_fuel, c.cement,
+c.gas_flaring, c.per_capita, c.bunker_fuels, t.avg_temp, t.avg_temp_uncertainty
+FROM carbon_emissions_yearly c
+INNER JOIN temp_country_yearly t
+ON c.country_year = t.country_year;
