@@ -16,6 +16,7 @@ Consists of importing and cleaning data to MySQL, to simulate predefined databas
 - Apache Sqoop 2
 - Apache Hive
 - Apache Impala
+- MySQL
 - Python 3.6 with JupyterLab: pyhive, numpy, pandas, matplotlib, statsmodels, pmdarima
 
 
